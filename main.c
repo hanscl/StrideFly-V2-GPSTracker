@@ -13,13 +13,20 @@
 #include "driverlib/uart.h"
 #include "utils/ustdlib.h"
 
-#define GPSBUFSIZE 256
+#define GPSBUFSIZE 128
+#define XBEEBUFSIZE 256
+#define FRAMEBUFSIZE 15
 
 // Global Variables
 uint32_t rcvCnt;	// GPS UART receive counter
 const uint32_t gpsIntervalSec = 5;
 uint32_t gpsIntervalMult;
 uint32_t xbeeRepeat;
+char *destAddrHexHigh;
+char *destAddrHexLow;
+char *destAddrCharHigh;
+char *destAddrCharLow;
+
 
 
 // Function Prototypes
@@ -29,11 +36,109 @@ void SendToGPS(char *nmeaMsg);
 void ToggleGPS(void);
 void ProcessReceivedNMEA(char *nmeaSentence);
 void TransmitViaXbee(char *nmeaSentence);
+void InitXBee(void);
+
+
+void InitXBee()
+{
+	uint32_t iCharCnt;
+	uint32_t addrLen;
+	char hex[3];
+
+	// Allocate memory for the destination Address Strings
+	destAddrHexHigh = malloc(9);
+	destAddrHexLow = malloc(9);
+	destAddrCharHigh = malloc(5);
+	destAddrCharLow = malloc(5);
+
+	// Set null terminator for strings
+	destAddrCharHigh[4] = '\0';
+	destAddrCharLow[4] = '\0';
+
+	// Set dest address in hex (will come from flash later)
+	char hexHigh[] = "0013A200";
+	char hexLow[] = "40A7DB0F";
+
+	// Copy the const chars into the strings on the heap
+	ustrncpy(destAddrHexHigh, hexHigh, strlen(hexHigh));
+	ustrncpy(destAddrHexLow, hexLow, strlen(hexLow));
+
+	// Convert High Address to Chars
+	addrLen = ustrlen(destAddrHexHigh);
+	for(iCharCnt  = 0; iCharCnt < (addrLen -1)/2; iCharCnt++) {
+		usprintf(hex, "%c%c", destAddrHexHigh[iCharCnt *2], destAddrHexHigh[iCharCnt *2 + 1]);
+		destAddrCharHigh[iCharCnt] = (char)ustrtoul(hex, NULL, 16);
+	}
+
+	// Convert Low Address to Chars
+	addrLen = ustrlen(destAddrHexLow);
+	for(iCharCnt  = 0; iCharCnt < (addrLen -1)/2; iCharCnt++) {
+		usprintf(hex, "%c%c", destAddrHexLow[iCharCnt *2], destAddrHexLow[iCharCnt *2 + 1]);
+		destAddrCharLow[iCharCnt] = (char)ustrtoul(hex, NULL, 16);
+	}
+
+}
 
 void TransmitViaXBee(char *nmeaSentence)
 {
-	// Format String for XBee Tx Frame 0x10
+	uint32_t iTxCnt;
+	uint32_t checkSum;
+	uint32_t iCharCnt;
+	uint32_t byteCount;
+	uint32_t cnt[3];
+	uint32_t currByte;
 
+	char innerFrame[XBEEBUFSIZE];
+    char payload[GPSBUFSIZE];
+    char txFrame[XBEEBUFSIZE];
+
+    for(iTxCnt = 1; iTxCnt <= xbeeRepeat; iTxCnt++) {
+        currByte = 0;
+        innerFrame[currByte++] = 0x7E; // Start Delimiter
+        innerFrame[currByte++] = 0x00; // Placeholder for MSB Length
+        innerFrame[currByte++] = 0x00; // Placeholder for LSB Length
+        innerFrame[currByte++] = 0x10; // Begin Frame-specific data
+        innerFrame[currByte++] = 0x00; // Frame ID
+        for(iCharCnt = 0; iCharCnt < 4; iCharCnt++) {
+        	innerFrame[currByte++] = destAddrCharHigh[iCharCnt];
+        }
+        for(iCharCnt = 0; iCharCnt < 4; iCharCnt++) {
+        	innerFrame[currByte++] = destAddrCharLow[iCharCnt];
+        }
+        innerFrame[currByte++] = 0xFF; // MSB 16-bit Addr/Reserved
+        innerFrame[currByte++] = 0xFE; // LSB 16-bit Addr/Reserved
+        innerFrame[currByte++] = 0x00; // Radius
+        innerFrame[currByte++] = 0x00; // Options
+        // Payload starts here
+        innerFrame[currByte++] = 0x5B; // '['
+        innerFrame[currByte++] = iTxCnt + 48; // Current Send Attempt
+        innerFrame[currByte++] = 0x02F; // '/'
+        innerFrame[currByte++] = xbeeRepeat + 48; // Total Send Attempts
+        innerFrame[currByte++] = 0x5D; // ']'
+        for(iCharCnt = 0; iCharCnt < strlen(nmeaSentence); iCharCnt++) {
+        	innerFrame[currByte++] = nmeaSentence[iCharCnt];
+         }
+
+        // Update Length
+        innerFrame[2] = currByte - 3;
+
+        // Calculate checksum
+        checkSum = 0;
+        for(iCharCnt = 3; iCharCnt < currByte; iCharCnt++)
+        {
+        	checkSum = (checkSum + (uint32_t)innerFrame[iCharCnt]) % 255;
+        }
+
+        innerFrame[currByte++] = 255 - checkSum;
+
+        // Print final string to console
+        puts(innerFrame);
+        // And put out HEX
+        for(iCharCnt = 0; iCharCnt < currByte; iCharCnt++) {
+        	printf("%02X ", innerFrame[iCharCnt]);
+        }
+
+    }
 }
 
 
@@ -166,12 +271,14 @@ int main(void)
 	char* nmeaSentence;
     char nextChar;
 
-    // Set default parameters
-    gpsIntervalMult = 1;
-    xbeeRepeat = 3;
 
     // Set CPU Clock
     SysCtlClockSet(SYSCTL_SYSDIV_4 | SYSCTL_USE_PLL | SYSCTL_OSC_MAIN | SYSCTL_XTAL_16MHZ);
+
+    // Set default parameters
+    gpsIntervalMult = 3;
+    xbeeRepeat = 1;
+
 
     printf("Initializing Tiva C Launchpad\r\n");
 
@@ -202,6 +309,7 @@ int main(void)
 
     // Init GPS
     ToggleGPS();
+    InitXBee();
 
     printf("Finished initializing launchpad. Entering while loop.\r\n");
 
