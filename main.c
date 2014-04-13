@@ -6,6 +6,7 @@
 #include "inc/hw_memmap.h"
 #include "inc/hw_types.h"
 #include "inc/hw_ints.h"
+#include "inc/hw_gpio.h"
 #include "driverlib/interrupt.h"
 #include "driverlib/sysctl.h"
 #include "driverlib/pin_map.h"
@@ -18,7 +19,7 @@
 #define FRAMEBUFSIZE 15
 
 // Global Variables
-uint32_t rcvCnt;	// GPS UART receive counter
+uint32_t rcvCnt, xbeeRcv;	// GPS UART receive counter
 const uint32_t gpsIntervalSec = 5;
 uint32_t gpsIntervalMult;
 uint32_t xbeeRepeat;
@@ -92,6 +93,11 @@ void TransmitViaXBee(char *nmeaSentence)
     char payload[GPSBUFSIZE];
     char txFrame[XBEEBUFSIZE];
 
+    // wake up Xbee by de-asserting PF2
+    GPIOPinWrite(GPIO_PORTF_BASE, GPIO_PIN_2, 0x00);
+    // Wait 500ms before continuing
+            SysCtlDelay(1400000);
+
     for(iTxCnt = 1; iTxCnt <= xbeeRepeat; iTxCnt++) {
         currByte = 0;
         innerFrame[currByte++] = 0x7E; // Start Delimiter
@@ -126,17 +132,27 @@ void TransmitViaXBee(char *nmeaSentence)
         checkSum = 0;
         for(iCharCnt = 3; iCharCnt < currByte; iCharCnt++)
         {
-        	checkSum = (checkSum + (uint32_t)innerFrame[iCharCnt]) % 255;
+        	checkSum = (checkSum + (uint32_t)innerFrame[iCharCnt]) % 256;
         }
 
         innerFrame[currByte++] = 255 - checkSum;
 
         // Print final string to console
-        puts(innerFrame);
-        // And put out HEX
+        //puts(innerFrame);
+
+
+
+
+     	// And put out HEX
         for(iCharCnt = 0; iCharCnt < currByte; iCharCnt++) {
         	printf("%02X ", innerFrame[iCharCnt]);
+        	UARTCharPut(UART2_BASE,innerFrame[iCharCnt]);
         }
+
+        // Wait 500ms before putting the module back to sleep
+        SysCtlDelay(1400000);
+        // put Xbee back to sleep
+        GPIOPinWrite(GPIO_PORTF_BASE, GPIO_PIN_2, 0x04);
 
     }
 }
@@ -177,7 +193,7 @@ void ToggleGPS()
 	    SysCtlDelay(12000000);
 
 	    // turn PF3 on - toggle GPS
-	    GPIOPinWrite(GPIO_PORTF_BASE, GPIO_PIN_3, 0xFF);
+	    GPIOPinWrite(GPIO_PORTF_BASE, GPIO_PIN_3, 0x08);
 }
 
 void InitGPS()
@@ -266,11 +282,11 @@ void ProcessReceivedNMEA(char *nmeaSentence) {
 int main(void)
 {
 	char uartBuffer[GPSBUFSIZE];
+	char xbeeBuffer[XBEEBUFSIZE];
 	char nmeaStart = '$';
 	char nmeaEnd = '\n';
 	char* nmeaSentence;
     char nextChar;
-
 
     // Set CPU Clock
     SysCtlClockSet(SYSCTL_SYSDIV_4 | SYSCTL_USE_PLL | SYSCTL_OSC_MAIN | SYSCTL_XTAL_16MHZ);
@@ -298,6 +314,13 @@ int main(void)
     GPIOPinTypeUART(GPIO_PORTC_BASE, GPIO_PIN_4 | GPIO_PIN_5);
     UARTConfigSetExpClk(UART1_BASE, SysCtlClockGet(), 4800, (UART_CONFIG_WLEN_8 | UART_CONFIG_STOP_ONE | UART_CONFIG_PAR_NONE));
 
+    //
+       // Enable pin PD7 for UART2 U2TX
+       // First open the lock and select the bits we want to modify in the GPIO commit register.
+       //
+       HWREG(GPIO_PORTD_BASE + GPIO_O_LOCK) = GPIO_LOCK_KEY;
+       HWREG(GPIO_PORTD_BASE + GPIO_O_CR) = 0x80;
+
     // Initialize UART configuration (UART2 for XBEE)
     GPIOPinConfigure(GPIO_PD6_U2RX);
     GPIOPinConfigure(GPIO_PD7_U2TX);
@@ -305,7 +328,7 @@ int main(void)
     UARTConfigSetExpClk(UART2_BASE, SysCtlClockGet(), 9600, (UART_CONFIG_WLEN_8 | UART_CONFIG_STOP_ONE | UART_CONFIG_PAR_NONE));
 
     // Turn on red LED
-    GPIOPinWrite(GPIO_PORTF_BASE, GPIO_PIN_1|GPIO_PIN_2|GPIO_PIN_3, 0x02);
+   // GPIOPinWrite(GPIO_PORTF_BASE, GPIO_PIN_1|GPIO_PIN_2|GPIO_PIN_3, 0x02);
 
     // Init GPS
     ToggleGPS();
@@ -314,17 +337,18 @@ int main(void)
     printf("Finished initializing launchpad. Entering while loop.\r\n");
 
     // Turn on red LED
-    GPIOPinWrite(GPIO_PORTF_BASE, GPIO_PIN_1|GPIO_PIN_2|GPIO_PIN_3, 0x00);
+   // GPIOPinWrite(GPIO_PORTF_BASE, GPIO_PIN_1|GPIO_PIN_2|GPIO_PIN_3, 0x00);
 
     // Initialize global receive counter as 0
     rcvCnt = 0;
+    xbeeRcv = 0;
 
     while(1)
     {
         // Process Chars from GPS at UART1 ...
         if (UARTCharsAvail(UART1_BASE)) {
         	nextChar = UARTCharGet(UART1_BASE);
-        	putc(nextChar, stdout); // Debug
+     //   	putc(nextChar, stdout); // Debug
         	if(rcvCnt >= GPSBUFSIZE || nextChar == nmeaStart) { // ensure there is no buffer overflow
         		rcvCnt = 0;
         		uartBuffer[rcvCnt] = nextChar;
@@ -348,5 +372,15 @@ int main(void)
         	rcvCnt++;
 
         }
+
+        // Process Chars from GPS at UART1 ...
+               if (UARTCharsAvail(UART2_BASE)) {
+               	nextChar = UARTCharGet(UART2_BASE);
+               	putc(nextChar, stdout); // Debug
+
+
+               	xbeeRcv++;
+
+               }
     }
 }
