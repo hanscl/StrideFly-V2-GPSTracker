@@ -11,6 +11,7 @@
 #include "driverlib/sysctl.h"
 #include "driverlib/pin_map.h"
 #include "driverlib/gpio.h"
+#include "driverlib/timer.h"
 #include "driverlib/uart.h"
 #include "utils/ustdlib.h"
 
@@ -27,7 +28,8 @@ char *destAddrHexHigh;
 char *destAddrHexLow;
 char *destAddrCharHigh;
 char *destAddrCharLow;
-
+uint32_t bInitGPS;
+uint32_t gpsOnOff;
 
 
 // Function Prototypes
@@ -190,7 +192,7 @@ void ToggleGPS()
 	    GPIOPinWrite(GPIO_PORTF_BASE, GPIO_PIN_3, 0x00);
 
 	    // Wait 0.9 second (12M = 36M Cycles)
-	    SysCtlDelay(12000000);
+	    SysCtlDelay(16000000);
 
 	    // turn PF3 on - toggle GPS
 	    GPIOPinWrite(GPIO_PORTF_BASE, GPIO_PIN_3, 0x08);
@@ -203,6 +205,7 @@ void InitGPS()
 	uint32_t nmeaChecksum;
 	uint32_t loopCnt;
 	uint32_t rate;
+
 
 	char psrfCore[] = "PSRF103,%02u,%02u,%02u,01";
 	char psrfWrap[] = "$%s*%x\r\n";
@@ -218,7 +221,7 @@ void InitGPS()
     for(loopCnt = 0; loopCnt < 5; loopCnt++) {
 
     	if(loopCnt == 4)
-    		rate = gpsIntervalMult * gpsIntervalSec;
+    		rate = gpsIntervalMult * gpsIntervalSec * 0;
     	else
     		rate = 0;
 
@@ -242,14 +245,59 @@ void InitGPS()
     free(psrfBuffer);
     free(psrfFinal);
 
-
-    SysCtlDelay(2600000);
+    bInitGPS = 0;
+   // SysCtlDelay(2600000);
 
     // turn led back off
     GPIOPinWrite(GPIO_PORTF_BASE, GPIO_PIN_1, 0x00);
 
 }
 
+void QueryGPS()
+{
+	// Declare Variables
+	uint32_t bufSize = 32;
+	uint32_t nmeaChecksum;
+	uint32_t loopCnt;
+	uint32_t rate;
+
+	char psrfCore[] = "PSRF103,%02u,%02u,%02u,01";
+	char psrfWrap[] = "$%s*%x\r\n";
+
+	// Turn on LED while we process button push
+    GPIOPinWrite(GPIO_PORTF_BASE, GPIO_PIN_1, 0x02);
+
+    // Allocate space for buffers
+    char* psrfBuffer = malloc(bufSize);
+    char* psrfFinal = malloc(bufSize);
+
+    	// format the core string
+    	sprintf(psrfBuffer, psrfCore, 4, 1, 0);
+
+    	// get checksum for nmea message
+    	nmeaChecksum = NMEAChecksum(psrfBuffer);
+
+    	// format the complete NMEA command string
+    	sprintf(psrfFinal, psrfWrap, psrfBuffer, nmeaChecksum);
+
+    	// Debug output to console
+    	puts(psrfFinal);
+
+    	SendToGPS(psrfFinal);
+
+
+
+    // Clean up heap
+    free(psrfBuffer);
+    free(psrfFinal);
+
+
+  //  SysCtlDelay(2600000);
+
+    // turn led back off
+    GPIOPinWrite(GPIO_PORTF_BASE, GPIO_PIN_1, 0x00);
+
+}
 
 void ProcessReceivedNMEA(char *nmeaSentence) {
 
@@ -268,12 +316,23 @@ void ProcessReceivedNMEA(char *nmeaSentence) {
 	if(strncmp(nmeaSentence, cfgMsg, strlen(cfgMsg)) == 0) {
 		puts("configuration message");
 		if(strncmp(nmeaSentence, gpsReady, strlen(gpsReady)) == 0)
-			InitGPS();
-		else if(strncmp(nmeaSentence, gpsTrickle, strlen(gpsTrickle)) == 0)
-			ToggleGPS();
+		{
+			gpsOnOff = 1; // it's on now
+			puts("GPS is ON");
+			QueryGPS();
+		}
+		else if(strncmp(nmeaSentence, gpsTrickle, strlen(gpsTrickle)) == 0) {
+			gpsOnOff = 0; // it's off now
+			puts("GPS is OFF");
+		}
+
 	} else if(strncmp(nmeaSentence, gpsMsg, strlen(gpsMsg)) == 0) {
 		puts("gps message");
+
 		TransmitViaXBee(nmeaSentence);
+
+		if(gpsOnOff = 1);
+			ToggleGPS();//SysCtlDelay(10000000);
 	}
 
 	puts("Processing Complete");
@@ -287,6 +346,8 @@ int main(void)
 	char nmeaEnd = '\n';
 	char* nmeaSentence;
     char nextChar;
+    uint32_t ui32Period;
+
 
     // Set CPU Clock
     SysCtlClockSet(SYSCTL_SYSDIV_4 | SYSCTL_USE_PLL | SYSCTL_OSC_MAIN | SYSCTL_XTAL_16MHZ);
@@ -294,6 +355,8 @@ int main(void)
     // Set default parameters
     gpsIntervalMult = 3;
     xbeeRepeat = 1;
+    bInitGPS = 1;
+    gpsOnOff = 99;
 
 
     printf("Initializing Tiva C Launchpad\r\n");
@@ -304,6 +367,10 @@ int main(void)
     SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOC);
     SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOD);
     SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOF);
+    // Enable timer
+    SysCtlPeripheralEnable(SYSCTL_PERIPH_TIMER0);
+
+
 
     // Configure Pins PF1, PF2, PF3 for output
     GPIOPinTypeGPIOOutput(GPIO_PORTF_BASE, GPIO_PIN_1|GPIO_PIN_2|GPIO_PIN_3);
@@ -327,11 +394,23 @@ int main(void)
     GPIOPinTypeUART(GPIO_PORTD_BASE, GPIO_PIN_6 | GPIO_PIN_7);
     UARTConfigSetExpClk(UART2_BASE, SysCtlClockGet(), 9600, (UART_CONFIG_WLEN_8 | UART_CONFIG_STOP_ONE | UART_CONFIG_PAR_NONE));
 
+    // Configure Timer
+    TimerConfigure(TIMER0_BASE, TIMER_CFG_PERIODIC);
+
+   // uint32_t test = SysCtlClockGet();
+    ui32Period = (SysCtlClockGet() * 10);
+    TimerLoadSet(TIMER0_BASE, TIMER_A, ui32Period -1);
+    IntEnable(INT_TIMER0A);
+    TimerIntEnable(TIMER0_BASE, TIMER_TIMA_TIMEOUT);
+    IntMasterEnable();
+
+    TimerEnable(TIMER0_BASE, TIMER_A);
+
+
     // Turn on red LED
    // GPIOPinWrite(GPIO_PORTF_BASE, GPIO_PIN_1|GPIO_PIN_2|GPIO_PIN_3, 0x02);
 
-    // Init GPS
-    ToggleGPS();
+
     InitXBee();
 
     printf("Finished initializing launchpad. Entering while loop.\r\n");
@@ -343,12 +422,25 @@ int main(void)
     rcvCnt = 0;
     xbeeRcv = 0;
 
+
+
     while(1)
     {
+        if(gpsOnOff == 99) { // on/off status is unknown
+        	ToggleGPS();
+        	gpsOnOff = 88;
+        }
+
+        if(gpsOnOff == 1 && bInitGPS == 1) // gps is on but hasn't been initialized yet
+        	InitGPS();
+
+        if(gpsOnOff == 0 && bInitGPS == 1) // gps is off and hasn't been initialized. turn it on first
+        	ToggleGPS();
+
         // Process Chars from GPS at UART1 ...
         if (UARTCharsAvail(UART1_BASE)) {
         	nextChar = UARTCharGet(UART1_BASE);
-     //   	putc(nextChar, stdout); // Debug
+        	putc(nextChar, stdout); // Debug
         	if(rcvCnt >= GPSBUFSIZE || nextChar == nmeaStart) { // ensure there is no buffer overflow
         		rcvCnt = 0;
         		uartBuffer[rcvCnt] = nextChar;
@@ -382,5 +474,26 @@ int main(void)
                	xbeeRcv++;
 
                }
+
+
     }
+
+
+
+}
+
+void Timer0IntHandler(void)
+{
+	TimerIntClear(TIMER0_BASE, TIMER_TIMA_TIMEOUT);
+
+	if(bInitGPS == 1) // has not been initialized. Return
+		return;
+
+	if(gpsOnOff = 0);
+		ToggleGPS();
+
+
+	//ToggleGPS();
+	//SysCtlDelay(10000000); // wait for the GPS to wake up
+	//QueryGPS();
 }
