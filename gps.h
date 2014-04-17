@@ -41,5 +41,6 @@ extern tGpsState g_sGpsState;
 extern void InitGPS(void);
 extern void ToggleGPS(void);
 extern void ProcessReceivedNMEA(char *nmeaSentence);
+extern void QueryGPS(void);
 
 #endif /* GPS_H_ */

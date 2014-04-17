@@ -17,19 +17,4 @@
 #define XBEEBUFSIZE 255
 
 
-typedef struct
-{
-
-}tXBeeState;
-xbeeRcv;	// GPS UART receive counter
-const uint32_t gpsIntervalSec = 5;
-uint32_t gpsIntervalMult;
-uint32_t xbeeRepeat;
-char *destAddrHexHig
-
-char *destAddrHexHigh;
-	char *destAddrHexLow;
-	char *destAddrCharHigh;
-	char *destAddrCharLow;
-
 #endif /* STRIDEFLY_H_ */

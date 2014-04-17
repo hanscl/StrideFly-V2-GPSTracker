@@ -6,7 +6,9 @@
 // Software License Agreement
 //
 //*****************************************************************************
-
+#include <stdint.h>
+#include <stdlib.h> // Need this and ustdlib?
+#include "utils/ustdlib.h"
 #include "xbee.h"
 
 //*****************************************************************************

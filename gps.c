@@ -6,7 +6,10 @@
 // Software License Agreement
 //
 //*****************************************************************************
-
+#include <stdint.h>
+#include <stdlib.h> // Need this and ustdlib?
+#include "utils/ustdlib.h"
+#include <stdio.h>
 #include "gps.h"
 
 //*****************************************************************************
@@ -16,7 +19,6 @@
 //*****************************************************************************
 tGpsState g_sGpsState;
 
-
 //*****************************************************************************
 //
 // Function Prototypes only used in gps.c
@@ -24,7 +26,7 @@ tGpsState g_sGpsState;
 //*****************************************************************************
 uint32_t NMEAChecksum(char *nmeaMsg);
 void SendToGPS(char *nmeaMsg);
-void QueryGPS(void);
+
 
 //*****************************************************************************
 //
