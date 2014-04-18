@@ -94,15 +94,22 @@ void QueryGPS(uint8_t ui8MsgSelect)
 //*****************************************************************************
 void ProcessReceivedNMEA(char *nmeaSentence) {
 
-	char gpsMsg[] = "$GPRMC";
-	char cfgMsg[] = "$PSRF";
+	const char gpsMsg[] = "$GPRMC";
+	const char cfgMsg[] = "$PSRF";
 
-	char gpsReady[] = "$PSRF150,1";
-	char gpsTrickle[] = "$PSRF150,0";
+	// Strings for determining fix
+	const char nmeaSep[] = ",";
+	char nmeaInvalid = 'V';
+
+	const char gpsReady[] = "$PSRF150,1";
+	const char gpsTrickle[] = "$PSRF150,0";
+
+	char *gpsFix;
 
 	puts("Received complete NMEA Sentence");
 	printf("String Length: %u", strlen(nmeaSentence));
 	puts(nmeaSentence);
+
 
 	if(strncmp(nmeaSentence, cfgMsg, strlen(cfgMsg)) == 0) {
 		puts("configuration message");
@@ -124,9 +131,19 @@ void ProcessReceivedNMEA(char *nmeaSentence) {
 
 		TransmitViaXBee(nmeaSentence);
 
+		// Check if the GPS module has a valid fix.  If it does, we can hibernate because hot start is only 1 second
+		// If it doesn't have a fix yet, we will keep it on to keep searching fix.
+		// Careful, this means that if the tracker is on indoors it will drain the battery!!!
+		gpsFix = strpbrk(nmeaSentence, nmeaSep); // First section
+		gpsFix = strpbrk(gpsFix+1, nmeaSep); // Second section -> this is either A (valid) or V (invalid = no fix)
+
+		if(gpsFix[1] == nmeaInvalid) {
+			puts("GPS Module has no fix yet. Do not turn off");
+		}
 		// We're done sending. Turn off the GPS (make sure it is actually on)
-		if(g_sGpsState.i8OnOff == 1);
+		else if(g_sGpsState.i8OnOff == 1) {
 			ToggleGPS();
+		}
 	}
 
 	puts("Processing Complete");
