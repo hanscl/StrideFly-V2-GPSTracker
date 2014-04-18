@@ -10,6 +10,17 @@
 
 //*****************************************************************************
 //
+// Globally defined constants
+//
+//*****************************************************************************
+#define NMEA_MSG_GGA 0
+#define NMEA_MSG_GLL 1
+#define NMEA_MSG_GSA 2
+#define NMEA_MSG_GSV 3
+#define NMEA_MSG_RMC 4
+
+//*****************************************************************************
+//
 // Structure typedef to make storing application state data simpler.
 //
 //*****************************************************************************
@@ -41,6 +52,6 @@ extern tGpsState g_sGpsState;
 extern void InitGPS(void);
 extern void ToggleGPS(void);
 extern void ProcessReceivedNMEA(char *nmeaSentence);
-extern void QueryGPS(void);
+extern void QueryGPS(uint8_t ui8MsgSelect);
 
 #endif /* GPS_H_ */

@@ -9,8 +9,24 @@
 #include <stdint.h>
 #include <stdlib.h> // Need this and ustdlib?
 #include "utils/ustdlib.h"
+#include <string.h>
 #include <stdio.h>
+#include <stdbool.h>
+// Tiva C includes
+#include "inc/hw_memmap.h"
+#include "inc/hw_types.h"
+#include "inc/hw_ints.h"
+#include "inc/hw_gpio.h"
+#include "driverlib/interrupt.h"
+#include "driverlib/sysctl.h"
+#include "driverlib/pin_map.h"
+#include "driverlib/gpio.h"
+#include "driverlib/timer.h"
+#include "driverlib/uart.h"
+// Project includes
 #include "gps.h"
+#include "xbee.h"
+//#include "stridefly.h"
 
 //*****************************************************************************
 //
@@ -33,13 +49,11 @@ void SendToGPS(char *nmeaMsg);
 // Query GPS
 //
 //*****************************************************************************
-void QueryGPS()
+void QueryGPS(uint8_t ui8MsgSelect)
 {
 	// Declare Variables
 	uint32_t bufSize = 32;
 	uint32_t nmeaChecksum;
-	uint32_t loopCnt;
-	uint32_t rate;
 
 	char psrfCore[] = "PSRF103,%02u,%02u,%02u,01";
 	char psrfWrap[] = "$%s*%x\r\n";
@@ -51,32 +65,26 @@ void QueryGPS()
     char* psrfBuffer = malloc(bufSize);
     char* psrfFinal = malloc(bufSize);
 
-    	// format the core string
-    	sprintf(psrfBuffer, psrfCore, 4, 1, 0);
+    // format the core string
+    sprintf(psrfBuffer, psrfCore, ui8MsgSelect, 1, 0);
 
-    	// get checksum for nmea message
-    	nmeaChecksum = NMEAChecksum(psrfBuffer);
+    // get checksum for nmea message
+    nmeaChecksum = NMEAChecksum(psrfBuffer);
 
-    	// format the complete NMEA command string
-    	sprintf(psrfFinal, psrfWrap, psrfBuffer, nmeaChecksum);
+    // format the complete NMEA command string
+    sprintf(psrfFinal, psrfWrap, psrfBuffer, nmeaChecksum);
 
-    	// Debug output to console
-    	puts(psrfFinal);
+    // Debug output to console
+    puts(psrfFinal);
 
-    	SendToGPS(psrfFinal);
-
-
+    SendToGPS(psrfFinal);
 
     // Clean up heap
     free(psrfBuffer);
     free(psrfFinal);
 
-
-  //  SysCtlDelay(2600000);
-
     // turn led back off
     GPIOPinWrite(GPIO_PORTF_BASE, GPIO_PIN_1, 0x00);
-
 }
 
 //*****************************************************************************
@@ -92,32 +100,33 @@ void ProcessReceivedNMEA(char *nmeaSentence) {
 	char gpsReady[] = "$PSRF150,1";
 	char gpsTrickle[] = "$PSRF150,0";
 
-
 	puts("Received complete NMEA Sentence");
 	printf("String Length: %u", strlen(nmeaSentence));
 	puts(nmeaSentence);
 
-
 	if(strncmp(nmeaSentence, cfgMsg, strlen(cfgMsg)) == 0) {
 		puts("configuration message");
+		// If the GPS is ready to receive commands; send the GPRMC query
 		if(strncmp(nmeaSentence, gpsReady, strlen(gpsReady)) == 0)
 		{
-			gpsOnOff = 1; // it's on now
+			g_sGpsState.i8OnOff = 1; // it's on now
 			puts("GPS is ON");
-			QueryGPS();
+			QueryGPS(NMEA_MSG_RMC);
 		}
+		// if we receive the hibernate message, just save to global GPS state
 		else if(strncmp(nmeaSentence, gpsTrickle, strlen(gpsTrickle)) == 0) {
-			gpsOnOff = 0; // it's off now
+			g_sGpsState.i8OnOff = 0; // it's off now
 			puts("GPS is OFF");
 		}
-
+	// Here we ahve received a valid GPRMC message. Go ahead and send it out via XBee Module
 	} else if(strncmp(nmeaSentence, gpsMsg, strlen(gpsMsg)) == 0) {
 		puts("gps message");
 
 		TransmitViaXBee(nmeaSentence);
 
-		if(gpsOnOff = 1);
-			ToggleGPS();//SysCtlDelay(10000000);
+		// We're done sending. Turn off the GPS (make sure it is actually on)
+		if(g_sGpsState.i8OnOff == 1);
+			ToggleGPS();
 	}
 
 	puts("Processing Complete");
@@ -204,10 +213,13 @@ void InitGPS()
     // Disable NMEA messages 0-4 (GGA,GLL,GSA,GSV)
     for(loopCnt = 0; loopCnt < 5; loopCnt++) {
 
-    	if(loopCnt == 4)
+    	/*if(loopCnt == 4)
     		rate = gpsIntervalMult * gpsIntervalSec * 0;
     	else
-    		rate = 0;
+    		rate = 0;*/
+
+    	// Above code is for letting GPS run. Now we turn off all messages when initializing
+    	rate = 0;
 
     	// format the core string
     	sprintf(psrfBuffer, psrfCore, loopCnt, 0, rate);
@@ -229,8 +241,7 @@ void InitGPS()
     free(psrfBuffer);
     free(psrfFinal);
 
-    bInitGPS = 0;
-   // SysCtlDelay(2600000);
+    g_sGpsState.ui8InitState = 1;
 
     // turn led back off
     GPIOPinWrite(GPIO_PORTF_BASE, GPIO_PIN_1, 0x00);

@@ -192,5 +192,5 @@ void Timer0IntHandler(void)
 	if(g_sGpsState.i8OnOff == 0)
 		ToggleGPS();
 	else if(g_sGpsState.i8OnOff == 1)
-		QueryGPS();
+		QueryGPS(NMEA_MSG_RMC);
 }

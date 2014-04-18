@@ -44,6 +44,6 @@ extern tXBeeState g_sXBeeState;
 //
 //*****************************************************************************
 extern void InitXBee(void);
-extern void TransmitViaXbee(char *nmeaSentence);
+extern void TransmitViaXBee(char *nmeaSentence);
 
 #endif /* XBEE_H_ */

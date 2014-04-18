@@ -3,7 +3,7 @@
 //#include <stdbool.h>
 
 
-
+/*
 
 
 
@@ -25,7 +25,7 @@ uint32_t gpsOnOff;
 
 
 
-
+*/
 
 
 
